@@ -1,11 +1,16 @@
 package com.lorem.docklens
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -15,10 +20,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.lorem.docklens.ai.MediaPipeInferenceManager
 import com.lorem.docklens.ai.OcrHelper
-import com.lorem.docklens.data.AppDatabase
-import com.lorem.docklens.data.ChatRepository
-import com.lorem.docklens.data.DocumentRepository
-import com.lorem.docklens.data.ModelRepository
+import com.lorem.docklens.data.*
 import com.lorem.docklens.ui.navigation.Screen
 import com.lorem.docklens.ui.screens.ai.ModelSelectionScreen
 import com.lorem.docklens.ui.screens.ai.ModelSelectionViewModel
@@ -40,6 +42,7 @@ import com.lorem.docklens.ui.screens.specialized.SpecializedAnalysisScreen
 import com.lorem.docklens.ui.screens.specialized.SpecializedAnalysisViewModel
 import com.lorem.docklens.ui.screens.specialized.SpecializedAnalysisViewModelFactory
 import com.lorem.docklens.ui.theme.DockLensTheme
+import kotlinx.coroutines.launch
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -58,12 +61,14 @@ class MainActivity : ComponentActivity() {
 fun DocLensApp() {
     val navController = rememberNavController()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     
     // Data Layer
     val database = remember { AppDatabase.getDatabase(context) }
     val documentRepository = remember { DocumentRepository(database.documentDao()) }
     val chatRepository = remember { ChatRepository(database.chatDao()) }
-    val modelRepository = remember { ModelRepository() }
+    val modelRepository = remember { ModelRepository(context) }
+    val preferencesRepository = remember { UserPreferencesRepository(context) }
     
     // AI Layer
     val inferenceManager = remember { MediaPipeInferenceManager(context) }
@@ -73,47 +78,91 @@ fun DocLensApp() {
     val homeViewModel: HomeViewModel = viewModel(
         factory = HomeViewModelFactory(documentRepository)
     )
+
+    val onboardingCompleted by preferencesRepository.onboardingCompleted.collectAsState(initial = null)
+    val selectedModelId by preferencesRepository.selectedModelId.collectAsState(initial = null)
+    val useGpu by preferencesRepository.useGpu.collectAsState(initial = false)
+    val models by modelRepository.availableModels.collectAsState()
     
+    // Centralized routing and model loading logic
+    LaunchedEffect(onboardingCompleted, selectedModelId, models, useGpu) {
+        if (onboardingCompleted == true) {
+            val downloadedModels = models.filter { it.downloadStatus is DownloadStatus.Downloaded }
+            
+            if (downloadedModels.isEmpty()) {
+                val currentRoute = navController.currentBackStackEntry?.destination?.route
+                if (currentRoute == null || currentRoute.startsWith("onboarding") || currentRoute == Screen.Home.route) {
+                    navController.navigate(Screen.AiSetup.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            } else {
+                val modelToLoad = selectedModelId?.let { id -> downloadedModels.find { it.id == id } } ?: downloadedModels.first()
+                
+                if (selectedModelId == null) {
+                    scope.launch { preferencesRepository.setSelectedModelId(modelToLoad.id) }
+                }
+                
+                val modelFile = File(context.filesDir, "${modelToLoad.id}.task")
+                if (modelFile.exists() && modelFile.length() > 0) {
+                    val result = inferenceManager.loadModel(modelFile.absolutePath, modelToLoad.id, useGpu)
+                    if (result.isFailure) {
+                        Log.e("DocLensApp", "Failed to load model: ${result.exceptionOrNull()?.message}")
+                    }
+                } else {
+                    Log.e("DocLensApp", "Model file missing or empty despite repository status: ${modelFile.absolutePath}")
+                    modelRepository.refreshDownloadStatuses()
+                }
+                
+                val currentRoute = navController.currentBackStackEntry?.destination?.route
+                if (currentRoute == null || currentRoute == Screen.OnboardingWelcome.route) {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                } else if (currentRoute == Screen.OnboardingAskAnything.route || currentRoute == Screen.AiSetup.route) {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            }
+        }
+    }
+
+    if (onboardingCompleted == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
     NavHost(
         navController = navController,
-        startDestination = Screen.OnboardingWelcome.route
+        startDestination = if (onboardingCompleted == true) Screen.Home.route else Screen.OnboardingWelcome.route
     ) {
         composable(Screen.OnboardingWelcome.route) {
-            WelcomeScreen(
-                onNext = { navController.navigate(Screen.OnboardingPrivacy.route) }
-            )
+            WelcomeScreen(onNext = { navController.navigate(Screen.OnboardingPrivacy.route) })
         }
         composable(Screen.OnboardingPrivacy.route) {
-            PrivacyScreen(
-                onNext = { navController.navigate(Screen.OnboardingAskAnything.route) }
-            )
+            PrivacyScreen(onNext = { navController.navigate(Screen.OnboardingAskAnything.route) })
         }
         composable(Screen.OnboardingAskAnything.route) {
             AskAnythingScreen(
                 onFinish = {
-                    navController.navigate(Screen.AiSetup.route) {
-                        popUpTo(Screen.OnboardingWelcome.route) { inclusive = true }
+                    scope.launch {
+                        preferencesRepository.setOnboardingCompleted(true)
                     }
                 }
             )
         }
         composable(Screen.AiSetup.route) {
             val modelSelectionViewModel: ModelSelectionViewModel = viewModel(
-                factory = ModelSelectionViewModelFactory(modelRepository)
+                factory = ModelSelectionViewModelFactory(modelRepository, preferencesRepository, context)
             )
             ModelSelectionScreen(
                 viewModel = modelSelectionViewModel,
                 onModelSelected = { model ->
-                    val modelFile = File(context.filesDir, model.id + ".task")
-                    if (modelFile.exists()) {
-                        inferenceManager.loadModel(
-                            modelPath = modelFile.absolutePath, 
-                            modelId = model.id,
-                            useGpu = modelSelectionViewModel.uiState.value.useGpu
-                        )
-                        navController.navigate(Screen.Home.route) {
-                            popUpTo(Screen.AiSetup.route) { inclusive = true }
-                        }
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.AiSetup.route) { inclusive = true }
                     }
                 }
             )
@@ -152,7 +201,8 @@ fun DocLensApp() {
             )
             ChatScreen(
                 viewModel = chatViewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onSettingsClick = { navController.navigate(Screen.AiSetup.route) }
             )
         }
         composable(
@@ -173,10 +223,7 @@ fun DocLensApp() {
                     documentId = docId
                 )
             )
-            SpecializedAnalysisScreen(
-                viewModel = specializedViewModel,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            SpecializedAnalysisScreen(viewModel = specializedViewModel, onNavigateBack = { navController.popBackStack() })
         }
         composable(
             route = Screen.CompareDocuments.route,
@@ -196,10 +243,7 @@ fun DocLensApp() {
                     docId2 = docId2
                 )
             )
-            CompareDocumentsScreen(
-                viewModel = compareViewModel,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            CompareDocumentsScreen(viewModel = compareViewModel, onNavigateBack = { navController.popBackStack() })
         }
     }
 }

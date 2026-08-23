@@ -76,6 +76,7 @@ dependencies {
     implementation(libs.material)
     implementation(libs.mediapipe.genai)
     implementation(libs.mlkit.text.recognition)
+    implementation(libs.androidx.work.runtime.ktx)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

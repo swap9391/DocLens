@@ -2,10 +2,13 @@ package com.lorem.docklens.ai
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MediaPipeInferenceManager(private val context: Context) : InferenceManager {
@@ -15,8 +18,6 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
     private var _useGpu: Boolean = false
     private val isGenerating = AtomicBoolean(false)
     
-    // Bridge to handle asynchronous results from MediaPipe's LlmInference.
-    // In MediaPipe 0.10.x, the listener must be set at initialization time via options.
     private var activeResultListener: ((String, Boolean) -> Unit)? = null
 
     override val isModelLoaded: Boolean
@@ -25,12 +26,12 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
     override val currentModelId: String?
         get() = _currentModelId
 
-    override fun loadModel(modelPath: String, modelId: String, useGpu: Boolean): Result<Unit> {
+    override suspend fun loadModel(modelPath: String, modelId: String, useGpu: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         if (_currentModelPath == modelPath && _useGpu == useGpu && llmInference != null) {
-            return Result.success(Unit)
+            return@withContext Result.success(Unit)
         }
 
-        return try {
+        return@withContext try {
             unloadModel()
             
             val options = LlmInference.LlmInferenceOptions.builder()
@@ -45,15 +46,17 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
             _currentModelPath = modelPath
             _currentModelId = modelId
             _useGpu = useGpu
+            Log.d("InferenceManager", "Model loaded successfully: $modelId")
             Result.success(Unit)
         } catch (e: Exception) {
+            Log.e("InferenceManager", "Failed to load model: $modelPath", e)
             Result.failure(e)
         }
     }
 
     override fun generateResponse(prompt: String, bitmap: Bitmap?): Flow<InferenceStep> = callbackFlow {
         val inference = llmInference ?: run {
-            trySend(InferenceStep.Error("Model not loaded"))
+            trySend(InferenceStep.Error("AI Engine not initialized. Please ensure the model is fully downloaded and try again."))
             close()
             return@callbackFlow
         }
@@ -74,7 +77,6 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
         activeResultListener = { partialResult: String, done: Boolean ->
             buffer += partialResult
 
-            // Detection for reasoning models (DeepSeek R1 style: <think>...</think>)
             if (!isReasoning && buffer.contains("<think>")) {
                 isReasoning = true
                 val parts = buffer.split("<think>", limit = 2)
@@ -97,7 +99,6 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
                     }
                     buffer = ""
                 } else {
-                    // Only emit if we have a significant chunk and it doesn't look like a partial closing tag
                     if (buffer.length > 5 && !buffer.endsWith("<") && !buffer.endsWith("</") && !buffer.endsWith("</t")) {
                         reasoningText += buffer
                         trySend(InferenceStep.PartialReasoning(buffer))
@@ -123,9 +124,9 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
         }
 
         try {
-            // In 0.10.x, generateResponseAsync takes only the prompt string
             inference.generateResponseAsync(prompt)
         } catch (e: Exception) {
+            Log.e("InferenceManager", "Generation error", e)
             trySend(InferenceStep.Error(e.message ?: "Inference error"))
             isGenerating.set(false)
             close()
@@ -149,7 +150,5 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
         isGenerating.set(false)
     }
 
-    override fun clearSession() {
-        // Not applicable for basic LlmInference
-    }
+    override fun clearSession() {}
 }

@@ -22,6 +22,7 @@ enum class ModelFormat {
 sealed class DownloadStatus {
     object NotDownloaded : DownloadStatus()
     data class Downloading(val progress: Int) : DownloadStatus()
+    data class Paused(val progress: Int) : DownloadStatus()
     object Downloaded : DownloadStatus()
     data class Error(val message: String) : DownloadStatus()
 }

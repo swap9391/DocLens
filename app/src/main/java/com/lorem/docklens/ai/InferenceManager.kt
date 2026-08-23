@@ -7,7 +7,7 @@ interface InferenceManager {
     val isModelLoaded: Boolean
     val currentModelId: String?
     
-    fun loadModel(modelPath: String, modelId: String, useGpu: Boolean): Result<Unit>
+    suspend fun loadModel(modelPath: String, modelId: String, useGpu: Boolean): Result<Unit>
     fun generateResponse(prompt: String, bitmap: Bitmap? = null): Flow<InferenceStep>
     fun stopGeneration()
     fun unloadModel()

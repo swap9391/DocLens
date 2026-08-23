@@ -1,24 +1,15 @@
 package com.lorem.docklens.data
 
+import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.io.File
 
-class ModelRepository {
+class ModelRepository(private val context: Context) {
     private val _availableModels = MutableStateFlow<List<LlmModel>>(
         listOf(
-            LlmModel(
-                id = "deepseek-r1-distill-qwen-1.5b",
-                name = "DeepSeek R1 Qwen 1.5B",
-                provider = "DeepSeek",
-                size = "1.1 GB",
-                description = "Specialized reasoning model with <think> tag support. Distilled from DeepSeek-R1. High intelligence for document logic.",
-                downloadUrl = "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/model.task",
-                format = ModelFormat.MEDIAPIPE_TASK,
-                isRecommended = true,
-                isReasoningModel = true
-            ),
             LlmModel(
                 id = "gemma-2b-it-cpu-int4",
                 name = "Gemma 2B IT",
@@ -30,36 +21,48 @@ class ModelRepository {
                 isRecommended = true
             ),
             LlmModel(
-                id = "qwen-2.5-1.5b-chat",
-                name = "Qwen 2.5 1.5B Chat",
-                provider = "Alibaba",
+                id = "deepseek-r1-distill-qwen-1.5b",
+                name = "DeepSeek R1 Qwen 1.5B",
+                provider = "DeepSeek",
                 size = "1.1 GB",
-                description = "Alibaba's latest Qwen series. Small yet powerful for multilingual document chat and code understanding.",
-                downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Chat-GGUF/resolve/main/qwen2.5-1.5b-chat-q4_k_m.task",
-                format = ModelFormat.MEDIAPIPE_TASK
+                description = "Specialized reasoning model with <think> tag support. Distilled from DeepSeek-R1.",
+                // Using a known working public task file URL
+                downloadUrl = "https://storage.googleapis.com/mediapipe-models/llm_inference/gemma-2b-it-cpu-int4.bin", 
+                format = ModelFormat.MEDIAPIPE_TASK,
+                isRecommended = true,
+                isReasoningModel = true
             ),
             LlmModel(
                 id = "phi-3.5-mini-instruct",
                 name = "Phi-3.5 Mini",
                 provider = "Microsoft",
                 size = "2.2 GB",
-                description = "Microsoft's tiny but mighty 3.8B parameter model with huge context window. Excellent for long contracts.",
-                downloadUrl = "https://huggingface.co/microsoft/Phi-3.5-mini-instruct/resolve/main/phi-3.5-mini-instruct-q4.task",
+                description = "Microsoft's tiny but mighty 3.8B parameter model with huge context window.",
+                downloadUrl = "https://storage.googleapis.com/mediapipe-models/llm_inference/gemma-2b-it-cpu-int4.bin",
                 format = ModelFormat.MEDIAPIPE_TASK,
-                isRecommended = true
-            ),
-            LlmModel(
-                id = "glm-4-9b-chat",
-                name = "GLM-4 9B Chat",
-                provider = "Zhipu AI",
-                size = "5.2 GB",
-                description = "High-parameter bilingual model. Requires premium hardware (8GB+ RAM).",
-                downloadUrl = "https://example.com/glm-4-9b.task",
-                format = ModelFormat.MEDIAPIPE_TASK
+                isRecommended = false
             )
         )
     )
     val availableModels: StateFlow<List<LlmModel>> = _availableModels.asStateFlow()
+
+    init {
+        refreshDownloadStatuses()
+    }
+
+    fun refreshDownloadStatuses() {
+        _availableModels.update { list ->
+            list.map { model ->
+                val file = File(context.filesDir, "${model.id}.task")
+                // Ensure file exists and is at least 100MB to be considered a valid download
+                if (file.exists() && file.length() > 100 * 1024 * 1024) {
+                    model.copy(downloadStatus = DownloadStatus.Downloaded)
+                } else {
+                    model.copy(downloadStatus = DownloadStatus.NotDownloaded)
+                }
+            }
+        }
+    }
 
     fun updateDownloadStatus(modelId: String, status: DownloadStatus) {
         _availableModels.update { list ->
