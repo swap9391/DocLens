@@ -1,5 +1,6 @@
 package com.lorem.docklens.ui.screens.ai
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -11,6 +12,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,14 +24,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lorem.docklens.data.DownloadStatus
+import com.lorem.docklens.data.HFRemoteModelGroup
 import com.lorem.docklens.data.LlmModel
 import com.lorem.docklens.data.ModelFormat
-import com.lorem.docklens.ui.theme.DockLensTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,134 +40,165 @@ fun ModelSelectionScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // Handle back navigation when in repository detail view
+    BackHandler(enabled = uiState.selectedGroup != null) {
+        viewModel.selectGroup(null)
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             Column(modifier = Modifier.statusBarsPadding()) {
                 CenterAlignedTopAppBar(
-                    title = { Text("AI Model Selection", fontWeight = FontWeight.Bold) }
-                )
-                
-                // 1. Recommended Section
-                AnimatedVisibility(
-                    visible = uiState.searchQuery.isEmpty(),
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    Column {
+                    title = { 
                         Text(
-                            text = "Recommended for DocLens",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                        )
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        ) {
-                            items(uiState.recommendedModels) { model ->
-                                RecommendedModelCard(
-                                    model = model,
-                                    onDownload = { viewModel.downloadModel(model) },
-                                    onPause = { viewModel.pauseDownload(model) },
-                                    onStop = { viewModel.stopDownload(model) },
-                                    onDetail = { viewModel.showModelDetails(model) },
-                                    onClick = { 
-                                        if (model.downloadStatus is DownloadStatus.Downloaded) {
-                                            viewModel.selectModel(model)
-                                            onModelSelected(model)
-                                        } 
-                                    }
-                                )
+                            text = uiState.selectedGroup?.displayName ?: "AI Model Selection", 
+                            fontWeight = FontWeight.Bold 
+                        ) 
+                    },
+                    navigationIcon = {
+                        if (uiState.selectedGroup != null) {
+                            IconButton(onClick = { viewModel.selectGroup(null) }) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                             }
                         }
                     }
-                }
-
-                // 2. Search Bar
-                OutlinedTextField(
-                    value = uiState.searchQuery,
-                    onValueChange = { viewModel.onSearchQueryChanged(it) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    placeholder = { Text("Search models (GLM, Qwen, Phi...)") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    trailingIcon = if (uiState.searchQuery.isNotEmpty()) {
-                        {
-                            IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                )
+                
+                if (uiState.selectedGroup == null) {
+                    // 1. Recommended Section (Only on main screen)
+                    AnimatedVisibility(
+                        visible = uiState.searchQuery.isEmpty(),
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        Column {
+                            Text(
+                                text = "Recommended for DocLens",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                            )
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.padding(bottom = 16.dp)
+                            ) {
+                                items(uiState.recommendedModels) { model ->
+                                    ModelCard(
+                                        model = model,
+                                        onDownload = { viewModel.downloadModel(model) },
+                                        onPause = { viewModel.pauseDownload(model) },
+                                        onStop = { viewModel.stopDownload(model) },
+                                        onDetail = { viewModel.showModelDetails(model) },
+                                        onClick = { 
+                                            if (model.downloadStatus is DownloadStatus.Downloaded) {
+                                                viewModel.selectModel(model)
+                                                onModelSelected(model)
+                                            } 
+                                        },
+                                        modifier = Modifier.width(280.dp)
+                                    )
+                                }
                             }
                         }
-                    } else null,
-                    shape = MaterialTheme.shapes.large,
-                    singleLine = true
-                )
+                    }
+
+                    // 2. Search Bar
+                    OutlinedTextField(
+                        value = uiState.searchQuery,
+                        onValueChange = { viewModel.onSearchQueryChanged(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        placeholder = { Text("Search repositories...") },
+                        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                        trailingIcon = if (uiState.searchQuery.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
+                                    Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                                }
+                            }
+                        } else null,
+                        shape = MaterialTheme.shapes.large,
+                        singleLine = true
+                    )
+                }
             }
         }
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 24.dp)
-        ) {
-            // 3. Hardware Settings
-            item {
-                Surface(
-                    modifier = Modifier.padding(16.dp),
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+            if (uiState.selectedGroup != null) {
+                // SIBLINGS SCREEN: Show versions of the selected repository as cards
+                val groupModels = viewModel.getModelsForGroup(uiState.selectedGroup!!.id)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Rounded.Memory, null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text("Inference Engine", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text(if (uiState.useGpu) "GPU Accelerated" else "CPU Only", style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                        Switch(
-                            checked = uiState.useGpu,
-                            onCheckedChange = { viewModel.onToggleGpu(it) },
-                            thumbContent = if (uiState.useGpu) {
-                                { Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(16.dp)) }
-                            } else null
+                    item {
+                        Text(
+                            text = "Available versions in this repository:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    items(groupModels) { model ->
+                        ModelCard(
+                            model = model,
+                            onDownload = { viewModel.downloadModel(model) },
+                            onPause = { viewModel.pauseDownload(model) },
+                            onStop = { viewModel.stopDownload(model) },
+                            onDetail = { viewModel.showModelDetails(model) },
+                            onClick = { 
+                                if (model.downloadStatus is DownloadStatus.Downloaded) {
+                                    viewModel.selectModel(model)
+                                    onModelSelected(model)
+                                } 
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
-            }
-
-            item {
-                Text(
-                    text = if (uiState.searchQuery.isEmpty()) "All Available Models" else "Search Results",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 8.dp)
-                )
-            }
-
-            items(uiState.filteredModels) { model ->
-                ModelListItem(
-                    model = model,
-                    onDownload = { viewModel.downloadModel(model) },
-                    onPause = { viewModel.pauseDownload(model) },
-                    onStop = { viewModel.stopDownload(model) },
-                    onClick = { 
-                        if (model.downloadStatus is DownloadStatus.Downloaded) {
-                            viewModel.selectModel(model)
-                            onModelSelected(model)
-                        } 
+            } else {
+                // MAIN LIST SCREEN: Show Hardware settings and Repository groups
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    // 3. Hardware Settings
+                    item {
+                        HardwareSettingsCard(
+                            useGpu = uiState.useGpu,
+                            onToggleGpu = { viewModel.onToggleGpu(it) }
+                        )
                     }
-                )
+
+                    item {
+                        Text(
+                            text = if (uiState.searchQuery.isEmpty()) "Hugging Face Repositories" else "Search Results",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 8.dp)
+                        )
+                    }
+
+                    if (uiState.isRefreshing && uiState.remoteGroups.isEmpty()) {
+                        item {
+                            Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator()
+                            }
+                        }
+                    }
+
+                    items(uiState.remoteGroups) { group ->
+                        RepositoryListItem(
+                            group = group,
+                            onClick = { viewModel.selectGroup(group) }
+                        )
+                    }
+                }
             }
         }
     }
@@ -189,22 +222,87 @@ fun ModelSelectionScreen(
 }
 
 @Composable
-fun RecommendedModelCard(
+fun HardwareSettingsCard(useGpu: Boolean, onToggleGpu: (Boolean) -> Unit) {
+    Surface(
+        modifier = Modifier.padding(16.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Rounded.Memory, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text("Inference Engine", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(if (useGpu) "GPU Accelerated" else "CPU Only", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Switch(
+                checked = useGpu,
+                onCheckedChange = onToggleGpu,
+                thumbContent = if (useGpu) {
+                    { Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(16.dp)) }
+                } else null
+            )
+        }
+    }
+}
+
+@Composable
+fun RepositoryListItem(
+    group: HFRemoteModelGroup,
+    onClick: () -> Unit
+) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        headlineContent = { Text(group.displayName, fontWeight = FontWeight.SemiBold) },
+        supportingContent = { 
+            Text("${group.id.substringBefore("/")} • ${group.versionFiles.size} versions • ${group.downloads} downloads") 
+        },
+        leadingContent = {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.secondaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.FolderZip, 
+                        contentDescription = null, 
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        },
+        trailingContent = {
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline)
+        }
+    )
+}
+
+@Composable
+fun ModelCard(
     model: LlmModel,
     onDownload: () -> Unit,
     onPause: () -> Unit,
     onStop: () -> Unit,
     onDetail: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val gradientBrush = Brush.linearGradient(
         colors = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
     )
 
     Card(
-        modifier = Modifier
-            .width(280.dp)
-            .clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)),
         border = BorderStroke(0.5.dp, gradientBrush)
@@ -340,63 +438,6 @@ fun GradientButton(
 }
 
 @Composable
-fun ModelListItem(
-    model: LlmModel,
-    onDownload: () -> Unit,
-    onPause: () -> Unit,
-    onStop: () -> Unit,
-    onClick: () -> Unit
-) {
-    ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        headlineContent = { Text(model.name, fontWeight = FontWeight.SemiBold) },
-        supportingContent = { Text("${model.provider} • ${model.size} • ${if (model.isReasoningModel) "Reasoning" else "Chat"}") },
-        leadingContent = {
-            Icon(
-                imageVector = if (model.isReasoningModel) Icons.Rounded.Psychology else Icons.Rounded.ChatBubble,
-                contentDescription = null,
-                tint = if (model.isRecommended) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-            )
-        },
-        trailingContent = {
-            when (val status = model.downloadStatus) {
-                is DownloadStatus.NotDownloaded, is DownloadStatus.Error -> {
-                    IconButton(onClick = onDownload) {
-                        Icon(Icons.Rounded.Download, null, tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                is DownloadStatus.Downloading, is DownloadStatus.Paused -> {
-                    val progress = when(status) {
-                        is DownloadStatus.Downloading -> status.progress
-                        is DownloadStatus.Paused -> status.progress
-                        else -> 0
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(
-                                progress = { progress / 100f },
-                                modifier = Modifier.size(28.dp),
-                                strokeWidth = 3.dp
-                            )
-                            Text("${progress}%", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
-                        }
-                        IconButton(onClick = if (status is DownloadStatus.Downloading) onPause else onDownload) {
-                            Icon(if (status is DownloadStatus.Downloading) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
-                        }
-                        IconButton(onClick = onStop) {
-                            Icon(Icons.Rounded.Stop, null, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-                is DownloadStatus.Downloaded -> {
-                    Icon(Icons.Rounded.CheckCircle, null, tint = Color(0xFF4CAF50))
-                }
-            }
-        }
-    )
-}
-
-@Composable
 fun ModelDetailsDialog(
     model: LlmModel,
     onDismiss: () -> Unit,
@@ -414,9 +455,6 @@ fun ModelDetailsDialog(
                 DetailRow("Size", model.size)
                 DetailRow("Format", model.format.name)
                 DetailRow("Type", if (model.isReasoningModel) "Reasoning" else "General Chat")
-                if (model.supportVision) {
-                    DetailRow("Vision Support", "Yes")
-                }
             }
         },
         confirmButton = {
@@ -437,49 +475,5 @@ fun DetailRow(label: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Preview(showBackground = true)
-@Composable
-fun ModelSelectionScreenPreview() {
-    DockLensTheme {
-        val mockModels = listOf(
-            LlmModel(
-                id = "1",
-                name = "DeepSeek R1 Qwen 1.5B",
-                provider = "DeepSeek",
-                size = "1.1 GB",
-                description = "Specialized reasoning model with <think> tag support.",
-                downloadUrl = "",
-                format = ModelFormat.MEDIAPIPE_TASK,
-                isRecommended = true,
-                isReasoningModel = true
-            )
-        )
-        
-        Scaffold(
-            topBar = {
-                Column {
-                    CenterAlignedTopAppBar(title = { Text("AI Model Selection") })
-                    Text(
-                        text = "Recommended for DocLens",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                    )
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        items(mockModels) { RecommendedModelCard(it, {}, {}, {}, {}, {}) }
-                    }
-                }
-            }
-        ) { innerPadding ->
-            LazyColumn(modifier = Modifier.padding(innerPadding)) {
-                items(mockModels) { ModelListItem(it, {}, {}, {}, {}) }
-            }
-        }
     }
 }

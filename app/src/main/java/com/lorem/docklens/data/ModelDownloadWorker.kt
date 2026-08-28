@@ -29,6 +29,8 @@ class ModelDownloadWorker(
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
@@ -40,6 +42,7 @@ class ModelDownloadWorker(
         val modelId = inputData.getString("modelId") ?: return androidx.work.ListenableWorker.Result.failure()
         val modelName = inputData.getString("modelName") ?: "Model"
         val downloadUrl = inputData.getString("downloadUrl") ?: return androidx.work.ListenableWorker.Result.failure()
+        val format = inputData.getString("format") ?: "MEDIAPIPE_TASK"
 
         createNotificationChannel()
         
@@ -49,20 +52,26 @@ class ModelDownloadWorker(
             Log.w("ModelDownloadWorker", "Could not set foreground info", e)
         }
 
-        val destFile = File(applicationContext.filesDir, "$modelId.task")
+        val extension = if (format == "LITERT_LM") ".litertlm" else ".task"
+        val destFile = File(applicationContext.filesDir, "$modelId$extension")
         val tempFile = File(applicationContext.cacheDir, "$modelId.tmp")
 
         return try {
+            // Log the URL to help debug 400 errors
+            Log.d("ModelDownloadWorker", "Starting download from: $downloadUrl")
+
             val request = Request.Builder()
                 .url(downloadUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-                .header("Accept", "*/*")
+                .header("User-Agent", "DocLens/1.0")
                 .build()
 
             okHttpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    Log.e("ModelDownloadWorker", "Download failed with code: ${response.code} for URL: $downloadUrl")
-                    return androidx.work.ListenableWorker.Result.failure()
+                    val errorMsg = "Download failed: ${response.code} ${response.message}"
+                    Log.e("ModelDownloadWorker", "$errorMsg for URL: $downloadUrl")
+                    return androidx.work.ListenableWorker.Result.failure(
+                        workDataOf("error" to errorMsg)
+                    )
                 }
 
                 val body = response.body ?: throw IOException("Empty response body")
@@ -70,7 +79,7 @@ class ModelDownloadWorker(
 
                 body.byteStream().use { input ->
                     FileOutputStream(tempFile).use { output ->
-                        val data = ByteArray(16384)
+                        val data = ByteArray(65536) // Increased buffer size
                         var total: Long = 0
                         var count: Int
                         var lastProgress = 0
@@ -103,12 +112,16 @@ class ModelDownloadWorker(
                 androidx.work.ListenableWorker.Result.success()
             } else {
                 Log.e("ModelDownloadWorker", "Failed to rename temp file to dest file")
-                androidx.work.ListenableWorker.Result.failure()
+                androidx.work.ListenableWorker.Result.failure(
+                    workDataOf("error" to "Failed to save file to destination")
+                )
             }
         } catch (e: Exception) {
             Log.e("ModelDownloadWorker", "Error downloading model", e)
             if (tempFile.exists()) tempFile.delete()
-            androidx.work.ListenableWorker.Result.failure()
+            androidx.work.ListenableWorker.Result.failure(
+                workDataOf("error" to (e.message ?: "Unknown download error"))
+            )
         }
     }
 

@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.work.*
 import com.lorem.docklens.data.DownloadStatus
+import com.lorem.docklens.data.HFRemoteModelGroup
 import com.lorem.docklens.data.LlmModel
 import com.lorem.docklens.data.ModelDownloadWorker
 import com.lorem.docklens.data.ModelRepository
@@ -16,11 +17,14 @@ import kotlinx.coroutines.launch
 data class ModelSelectionUiState(
     val searchQuery: String = "",
     val filteredModels: List<LlmModel> = emptyList(),
+    val remoteGroups: List<HFRemoteModelGroup> = emptyList(),
     val recommendedModels: List<LlmModel> = emptyList(),
     val useGpu: Boolean = false,
     val selectedModelDetails: LlmModel? = null,
     val isModelSelected: Boolean = false,
-    val lastSelectedModel: LlmModel? = null
+    val lastSelectedModel: LlmModel? = null,
+    val isRefreshing: Boolean = false,
+    val selectedGroup: HFRemoteModelGroup? = null
 )
 
 class ModelSelectionViewModel(
@@ -34,39 +38,55 @@ class ModelSelectionViewModel(
     private val _selectedModelDetails = MutableStateFlow<LlmModel?>(null)
     private val _isModelSelected = MutableStateFlow(false)
     private val _lastSelectedModel = MutableStateFlow<LlmModel?>(null)
+    private val _isRefreshing = MutableStateFlow(false)
+    private val _selectedGroup = MutableStateFlow<HFRemoteModelGroup?>(null)
     
     private val workManager = WorkManager.getInstance(context)
 
     val uiState: StateFlow<ModelSelectionUiState> = combine(
         repository.availableModels,
+        repository.remoteGroups,
         _searchQuery,
         _useGpu,
         _selectedModelDetails,
         _isModelSelected,
-        _lastSelectedModel
+        _lastSelectedModel,
+        _isRefreshing,
+        _selectedGroup
     ) { args ->
         @Suppress("UNCHECKED_CAST")
         val models = args[0] as List<LlmModel>
-        val query = args[1] as String
-        val useGpu = args[2] as Boolean
-        val details = args[3] as LlmModel?
-        val isSelected = args[4] as Boolean
-        val lastModel = args[5] as LlmModel?
+        @Suppress("UNCHECKED_CAST")
+        val groups = args[1] as List<HFRemoteModelGroup>
+        val query = args[2] as String
+        val useGpu = args[3] as Boolean
+        val details = args[4] as LlmModel?
+        val isSelected = args[5] as Boolean
+        val lastModel = args[6] as LlmModel?
+        val refreshing = args[7] as Boolean
+        val selectedGroup = args[8] as HFRemoteModelGroup?
 
         ModelSelectionUiState(
             searchQuery = query,
             filteredModels = models.filter { 
                 it.name.contains(query, ignoreCase = true) || it.provider.contains(query, ignoreCase = true) 
             },
+            remoteGroups = groups.filter {
+                it.displayName.contains(query, ignoreCase = true) || it.id.contains(query, ignoreCase = true)
+            },
             recommendedModels = models.filter { it.isRecommended },
             useGpu = useGpu,
             selectedModelDetails = details,
             isModelSelected = isSelected,
-            lastSelectedModel = lastModel
+            lastSelectedModel = lastModel,
+            isRefreshing = refreshing,
+            selectedGroup = selectedGroup
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ModelSelectionUiState())
 
     init {
+        refreshModels()
+        
         viewModelScope.launch {
             preferencesRepository.useGpu.collect { enabled ->
                 _useGpu.value = enabled
@@ -77,6 +97,14 @@ class ModelSelectionViewModel(
             preferencesRepository.selectedModelId.collect { id ->
                 _lastSelectedModel.value = repository.availableModels.value.find { it.id == id }
             }
+        }
+    }
+
+    fun refreshModels() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            repository.fetchRemoteModels()
+            _isRefreshing.value = false
         }
     }
 
@@ -103,6 +131,14 @@ class ModelSelectionViewModel(
         _selectedModelDetails.value = model
     }
 
+    fun selectGroup(group: HFRemoteModelGroup?) {
+        _selectedGroup.value = group
+    }
+
+    fun getModelsForGroup(groupId: String): List<LlmModel> {
+        return repository.getModelsForGroup(groupId)
+    }
+
     fun downloadModel(model: LlmModel) {
         // Reset state before starting
         repository.updateDownloadStatus(model.id, DownloadStatus.Downloading(0))
@@ -111,7 +147,8 @@ class ModelSelectionViewModel(
             .setInputData(workDataOf(
                 "modelId" to model.id,
                 "modelName" to model.name,
-                "downloadUrl" to model.downloadUrl
+                "downloadUrl" to model.downloadUrl,
+                "format" to model.format.name
             ))
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .addTag("download_${model.id}")
