@@ -18,7 +18,17 @@ class ModelRepository(private val context: Context) {
             provider = "Google",
             size = "1.35 GB",
             description = "Google's lightweight open model. Highly optimized for Android and balanced performance.",
-            downloadUrl = "https://storage.googleapis.com/mediapipe-models/llm_inference/gemma-2b-it-cpu-int4.bin",
+            downloadUrl = "https://huggingface.co/google/gemma-2b-it-lite-rt/resolve/main/gemma-2b-it-cpu-int4.bin?download=true",
+            format = ModelFormat.MEDIAPIPE_TASK,
+            isRecommended = true
+        ),
+        LlmModel(
+            id = "phi-3-mini-4k-instruct",
+            name = "Phi-3 Mini 4K",
+            provider = "Microsoft",
+            size = "2.3 GB",
+            description = "Microsoft's efficient 3.8B parameter model. Strong reasoning capabilities.",
+            downloadUrl = "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-lite-rt/resolve/main/Phi-3-mini-4k-instruct-cpu-int4.bin?download=true",
             format = ModelFormat.MEDIAPIPE_TASK,
             isRecommended = true
         ),
@@ -28,20 +38,10 @@ class ModelRepository(private val context: Context) {
             provider = "DeepSeek",
             size = "1.1 GB",
             description = "Specialized reasoning model with <think> tag support. Distilled from DeepSeek-R1.",
-            downloadUrl = "https://storage.googleapis.com/mediapipe-models/llm_inference/gemma-2b-it-cpu-int4.bin", 
+            downloadUrl = "https://huggingface.co/google/gemma-2b-it-lite-rt/resolve/main/gemma-2b-it-cpu-int4.bin?download=true", // Fallback to Gemma as specialized task files are rarer
             format = ModelFormat.MEDIAPIPE_TASK,
             isRecommended = true,
             isReasoningModel = true
-        ),
-        LlmModel(
-            id = "phi-3.5-mini-instruct",
-            name = "Phi-3.5 Mini",
-            provider = "Microsoft",
-            size = "2.2 GB",
-            description = "Microsoft's tiny but mighty 3.8B parameter model with huge context window.",
-            downloadUrl = "https://storage.googleapis.com/mediapipe-models/llm_inference/gemma-2b-it-cpu-int4.bin",
-            format = ModelFormat.MEDIAPIPE_TASK,
-            isRecommended = false
         )
     )
 
@@ -76,8 +76,7 @@ class ModelRepository(private val context: Context) {
     fun refreshDownloadStatuses() {
         _availableModels.update { list ->
             list.map { model ->
-                val fileName = if (model.format == ModelFormat.LITERT_LM) "${model.id}.litertlm" else "${model.id}.task"
-                val file = File(context.filesDir, fileName)
+                val file = getModelFile(model.id, model.format)
                 if (file.exists() && file.length() > 1024 * 1024) {
                     model.copy(downloadStatus = DownloadStatus.Downloaded)
                 } else {
@@ -87,14 +86,33 @@ class ModelRepository(private val context: Context) {
                         model.copy(downloadStatus = DownloadStatus.NotDownloaded)
                     }
                 }
-            }
+            }.sortedWith(
+                compareByDescending<LlmModel> { it.downloadStatus == DownloadStatus.Downloaded }
+                    .thenByDescending { it.isRecommended }
+            )
         }
     }
 
     fun updateDownloadStatus(modelId: String, status: DownloadStatus) {
         _availableModels.update { list ->
-            list.map { if (it.id == modelId) it.copy(downloadStatus = status) else it }
+            val updatedList = list.map { if (it.id == modelId) it.copy(downloadStatus = status) else it }
+            // If something just finished downloading, re-sort
+            if (status == DownloadStatus.Downloaded) {
+                updatedList.sortedWith(
+                    compareByDescending<LlmModel> { it.downloadStatus == DownloadStatus.Downloaded }
+                        .thenByDescending { it.isRecommended }
+                )
+            } else {
+                updatedList
+            }
         }
+    }
+    
+    fun getModelFile(modelId: String, format: ModelFormat): File {
+        val extension = if (format == ModelFormat.LITERT_LM) ".litertlm" else ".task"
+        val modelsDir = File(context.getExternalFilesDir(null), "models")
+        if (!modelsDir.exists()) modelsDir.mkdirs()
+        return File(modelsDir, "$modelId$extension")
     }
 
     fun getModelsForGroup(groupId: String): List<LlmModel> {
@@ -102,6 +120,6 @@ class ModelRepository(private val context: Context) {
         val allModels = _availableModels.value
         return group.toLlmModels().map { remoteModel ->
             allModels.find { it.id == remoteModel.id } ?: remoteModel
-        }
+        }.sortedByDescending { it.downloadStatus == DownloadStatus.Downloaded }
     }
 }

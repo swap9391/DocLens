@@ -53,11 +53,16 @@ class ModelDownloadWorker(
         }
 
         val extension = if (format == "LITERT_LM") ".litertlm" else ".task"
-        val destFile = File(applicationContext.filesDir, "$modelId$extension")
-        val tempFile = File(applicationContext.cacheDir, "$modelId.tmp")
+        
+        // Match path used in ModelRepository
+        val modelsDir = File(applicationContext.getExternalFilesDir(null), "models")
+        if (!modelsDir.exists()) modelsDir.mkdirs()
+        
+        val destFile = File(modelsDir, "$modelId$extension")
+        // Use the same directory for temp file to avoid cross-volume rename failures
+        val tempFile = File(modelsDir, "$modelId.tmp")
 
         return try {
-            // Log the URL to help debug 400 errors
             Log.d("ModelDownloadWorker", "Starting download from: $downloadUrl")
 
             val request = Request.Builder()
@@ -79,14 +84,15 @@ class ModelDownloadWorker(
 
                 body.byteStream().use { input ->
                     FileOutputStream(tempFile).use { output ->
-                        val data = ByteArray(65536) // Increased buffer size
+                        val data = ByteArray(65536)
                         var total: Long = 0
                         var count: Int
                         var lastProgress = 0
                         
                         while (input.read(data).also { count = it } != -1) {
                             if (isStopped) {
-                                tempFile.delete()
+                                Log.d("ModelDownloadWorker", "Download stopped/cancelled. Cleaning up.")
+                                if (tempFile.exists()) tempFile.delete()
                                 return androidx.work.ListenableWorker.Result.failure()
                             }
                             
@@ -111,10 +117,19 @@ class ModelDownloadWorker(
                 Log.d("ModelDownloadWorker", "Successfully downloaded model to ${destFile.absolutePath}")
                 androidx.work.ListenableWorker.Result.success()
             } else {
-                Log.e("ModelDownloadWorker", "Failed to rename temp file to dest file")
-                androidx.work.ListenableWorker.Result.failure(
-                    workDataOf("error" to "Failed to save file to destination")
-                )
+                // Fallback: Copy if rename fails
+                try {
+                    tempFile.copyTo(destFile, overwrite = true)
+                    tempFile.delete()
+                    Log.d("ModelDownloadWorker", "Successfully copied model to ${destFile.absolutePath}")
+                    androidx.work.ListenableWorker.Result.success()
+                } catch (e: Exception) {
+                    Log.e("ModelDownloadWorker", "Failed to rename and copy temp file to dest file", e)
+                    if (tempFile.exists()) tempFile.delete()
+                    androidx.work.ListenableWorker.Result.failure(
+                        workDataOf("error" to "Failed to save file to destination: ${e.message}")
+                    )
+                }
             }
         } catch (e: Exception) {
             Log.e("ModelDownloadWorker", "Error downloading model", e)
@@ -132,7 +147,6 @@ class ModelDownloadWorker(
                 createNotification(modelName, progress)
             )
         } catch (e: Exception) {
-            // Notification updates might fail if suppressed
         }
     }
 

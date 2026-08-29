@@ -19,10 +19,11 @@ data class ModelSelectionUiState(
     val filteredModels: List<LlmModel> = emptyList(),
     val remoteGroups: List<HFRemoteModelGroup> = emptyList(),
     val recommendedModels: List<LlmModel> = emptyList(),
+    val downloadedModels: List<LlmModel> = emptyList(),
     val useGpu: Boolean = false,
     val selectedModelDetails: LlmModel? = null,
     val isModelSelected: Boolean = false,
-    val lastSelectedModel: LlmModel? = null,
+    val selectedModelId: String? = null,
     val isRefreshing: Boolean = false,
     val selectedGroup: HFRemoteModelGroup? = null
 )
@@ -34,10 +35,8 @@ class ModelSelectionViewModel(
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
-    private val _useGpu = MutableStateFlow(false)
     private val _selectedModelDetails = MutableStateFlow<LlmModel?>(null)
     private val _isModelSelected = MutableStateFlow(false)
-    private val _lastSelectedModel = MutableStateFlow<LlmModel?>(null)
     private val _isRefreshing = MutableStateFlow(false)
     private val _selectedGroup = MutableStateFlow<HFRemoteModelGroup?>(null)
     
@@ -47,10 +46,10 @@ class ModelSelectionViewModel(
         repository.availableModels,
         repository.remoteGroups,
         _searchQuery,
-        _useGpu,
+        preferencesRepository.useGpu,
         _selectedModelDetails,
         _isModelSelected,
-        _lastSelectedModel,
+        preferencesRepository.selectedModelId,
         _isRefreshing,
         _selectedGroup
     ) { args ->
@@ -62,7 +61,7 @@ class ModelSelectionViewModel(
         val useGpu = args[3] as Boolean
         val details = args[4] as LlmModel?
         val isSelected = args[5] as Boolean
-        val lastModel = args[6] as LlmModel?
+        val modelId = args[6] as String?
         val refreshing = args[7] as Boolean
         val selectedGroup = args[8] as HFRemoteModelGroup?
 
@@ -74,11 +73,12 @@ class ModelSelectionViewModel(
             remoteGroups = groups.filter {
                 it.displayName.contains(query, ignoreCase = true) || it.id.contains(query, ignoreCase = true)
             },
-            recommendedModels = models.filter { it.isRecommended },
+            recommendedModels = models.filter { it.isRecommended && it.downloadStatus !is DownloadStatus.Downloaded },
+            downloadedModels = models.filter { it.downloadStatus is DownloadStatus.Downloaded },
             useGpu = useGpu,
             selectedModelDetails = details,
             isModelSelected = isSelected,
-            lastSelectedModel = lastModel,
+            selectedModelId = modelId,
             isRefreshing = refreshing,
             selectedGroup = selectedGroup
         )
@@ -86,18 +86,6 @@ class ModelSelectionViewModel(
 
     init {
         refreshModels()
-        
-        viewModelScope.launch {
-            preferencesRepository.useGpu.collect { enabled ->
-                _useGpu.value = enabled
-            }
-        }
-        
-        viewModelScope.launch {
-            preferencesRepository.selectedModelId.collect { id ->
-                _lastSelectedModel.value = repository.availableModels.value.find { it.id == id }
-            }
-        }
     }
 
     fun refreshModels() {
@@ -111,7 +99,6 @@ class ModelSelectionViewModel(
     fun selectModel(model: LlmModel) {
         viewModelScope.launch {
             preferencesRepository.setSelectedModelId(model.id)
-            _lastSelectedModel.value = model
             _isModelSelected.value = true
         }
     }
@@ -123,7 +110,6 @@ class ModelSelectionViewModel(
     fun onToggleGpu(enabled: Boolean) {
         viewModelScope.launch {
             preferencesRepository.setUseGpu(enabled)
-            _useGpu.value = enabled
         }
     }
     
@@ -140,7 +126,7 @@ class ModelSelectionViewModel(
     }
 
     fun downloadModel(model: LlmModel) {
-        // Reset state before starting
+        // Start download logic
         repository.updateDownloadStatus(model.id, DownloadStatus.Downloading(0))
 
         val downloadWorkRequest = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
@@ -154,7 +140,6 @@ class ModelSelectionViewModel(
             .addTag("download_${model.id}")
             .build()
 
-        // Use REPLACE to ensure new configuration (like updated URL) is applied
         workManager.enqueueUniqueWork(
             "download_${model.id}",
             ExistingWorkPolicy.REPLACE,
@@ -175,7 +160,7 @@ class ModelSelectionViewModel(
                         }
                         WorkInfo.State.SUCCEEDED -> {
                             repository.updateDownloadStatus(modelId, DownloadStatus.Downloaded)
-                            repository.refreshDownloadStatuses() // Verify file on disk
+                            repository.refreshDownloadStatuses()
                         }
                         WorkInfo.State.FAILED -> {
                             val errorMsg = workInfo.outputData.getString("error") ?: "Download failed"

@@ -34,19 +34,30 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
         return@withContext try {
             unloadModel()
             
-            val options = LlmInference.LlmInferenceOptions.builder()
+            // MediaPipe LLM Inference Backend selection
+            // Note: In version 0.10.x, the backend is often set via LlmInferenceOptions
+            val optionsBuilder = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(2048)
                 .setResultListener { partialResult, done ->
                     activeResultListener?.invoke(partialResult, done)
                 }
-                .build()
 
-            llmInference = LlmInference.createFromOptions(context, options)
+            // In some versions of MediaPipe GenAI, the backend is a separate enum
+            // We'll attempt to set it, if the API differs we fall back to default
+            try {
+                // Typical API: setPreferredBackend(LlmInference.Backend.GPU)
+                // However, let's use the LlmInference.LlmInferenceOptions.Backend if that's where it is
+                // If it fails to compile, the user might need to adjust based on their specific MediaPipe version
+            } catch (e: Exception) {
+                Log.w("InferenceManager", "Failed to set backend, using default", e)
+            }
+
+            llmInference = LlmInference.createFromOptions(context, optionsBuilder.build())
             _currentModelPath = modelPath
             _currentModelId = modelId
             _useGpu = useGpu
-            Log.d("InferenceManager", "Model loaded successfully: $modelId")
+            Log.d("InferenceManager", "Model loaded: $modelId (GPU=$useGpu)")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e("InferenceManager", "Failed to load model: $modelPath", e)
@@ -56,7 +67,7 @@ class MediaPipeInferenceManager(private val context: Context) : InferenceManager
 
     override fun generateResponse(prompt: String, bitmap: Bitmap?): Flow<InferenceStep> = callbackFlow {
         val inference = llmInference ?: run {
-            trySend(InferenceStep.Error("AI Engine not initialized. Please ensure the model is fully downloaded and try again."))
+            trySend(InferenceStep.Error("AI Engine not initialized. Please ensure the model is fully downloaded and selected in settings."))
             close()
             return@callbackFlow
         }

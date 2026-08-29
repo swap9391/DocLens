@@ -2,10 +2,7 @@ package com.lorem.docklens.ui.screens.ai
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,7 +16,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
@@ -30,7 +26,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lorem.docklens.data.DownloadStatus
 import com.lorem.docklens.data.HFRemoteModelGroup
 import com.lorem.docklens.data.LlmModel
-import com.lorem.docklens.data.ModelFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,46 +59,70 @@ fun ModelSelectionScreen(
                         }
                     }
                 )
-                
-                if (uiState.selectedGroup == null) {
-                    // 1. Recommended Section (Only on main screen)
-                    AnimatedVisibility(
-                        visible = uiState.searchQuery.isEmpty(),
-                        enter = expandVertically(),
-                        exit = shrinkVertically()
-                    ) {
-                        Column {
-                            Text(
-                                text = "Recommended for DocLens",
-                                style = MaterialTheme.typography.titleMedium,
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                            )
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            ) {
-                                items(uiState.recommendedModels) { model ->
-                                    ModelCard(
-                                        model = model,
-                                        onDownload = { viewModel.downloadModel(model) },
-                                        onPause = { viewModel.pauseDownload(model) },
-                                        onStop = { viewModel.stopDownload(model) },
-                                        onDetail = { viewModel.showModelDetails(model) },
-                                        onClick = { 
-                                            if (model.downloadStatus is DownloadStatus.Downloaded) {
-                                                viewModel.selectModel(model)
-                                                onModelSelected(model)
-                                            } 
-                                        },
-                                        modifier = Modifier.width(280.dp)
-                                    )
-                                }
+            }
+        }
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
+            if (uiState.selectedGroup == null) {
+                // 1. Downloaded Models Section (Horizontal Row)
+                if (uiState.downloadedModels.isNotEmpty() && uiState.searchQuery.isEmpty()) {
+                    item {
+                        Text(
+                            text = "Downloaded Models",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                        )
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        ) {
+                            items(uiState.downloadedModels) { model ->
+                                val isSelected = model.id == uiState.selectedModelId
+                                ModelCard(
+                                    model = model,
+                                    onDownload = {},
+                                    onPause = {},
+                                    onStop = {},
+                                    onDetail = { viewModel.showModelDetails(model) },
+                                    onClick = { 
+                                        viewModel.selectModel(model)
+                                        onModelSelected(model)
+                                    },
+                                    isSelected = isSelected,
+                                    modifier = Modifier.width(280.dp)
+                                )
                             }
                         }
                     }
+                }
 
-                    // 2. Search Bar
+                // 2. Hardware Settings
+                item {
+                    HardwareSettingsCard(
+                        useGpu = uiState.useGpu,
+                        onToggleGpu = { viewModel.onToggleGpu(it) }
+                    )
+                }
+
+                // 3. Recommended / Remote Search Section
+                item {
+                    Text(
+                        text = if (uiState.searchQuery.isEmpty()) "Available Repositories" else "Search Results",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 8.dp)
+                    )
+                }
+
+                item {
                     OutlinedTextField(
                         value = uiState.searchQuery,
                         onValueChange = { viewModel.onSearchQueryChanged(it) },
@@ -112,92 +131,53 @@ fun ModelSelectionScreen(
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         placeholder = { Text("Search repositories...") },
                         leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                        trailingIcon = if (uiState.searchQuery.isNotEmpty()) {
-                            {
-                                IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
-                                    Icon(Icons.Rounded.Close, contentDescription = "Clear")
-                                }
-                            }
-                        } else null,
                         shape = MaterialTheme.shapes.large,
                         singleLine = true
                     )
                 }
-            }
-        }
-    ) { innerPadding ->
-        Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
-            if (uiState.selectedGroup != null) {
-                // SIBLINGS SCREEN: Show versions of the selected repository as cards
-                val groupModels = viewModel.getModelsForGroup(uiState.selectedGroup!!.id)
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    item {
-                        Text(
-                            text = "Available versions in this repository:",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                    }
-                    items(groupModels) { model ->
-                        ModelCard(
-                            model = model,
-                            onDownload = { viewModel.downloadModel(model) },
-                            onPause = { viewModel.pauseDownload(model) },
-                            onStop = { viewModel.stopDownload(model) },
-                            onDetail = { viewModel.showModelDetails(model) },
-                            onClick = { 
-                                if (model.downloadStatus is DownloadStatus.Downloaded) {
-                                    viewModel.selectModel(model)
-                                    onModelSelected(model)
-                                } 
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            } else {
-                // MAIN LIST SCREEN: Show Hardware settings and Repository groups
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 24.dp)
-                ) {
-                    // 3. Hardware Settings
-                    item {
-                        HardwareSettingsCard(
-                            useGpu = uiState.useGpu,
-                            onToggleGpu = { viewModel.onToggleGpu(it) }
-                        )
-                    }
 
+                if (uiState.isRefreshing && uiState.remoteGroups.isEmpty()) {
                     item {
-                        Text(
-                            text = if (uiState.searchQuery.isEmpty()) "Hugging Face Repositories" else "Search Results",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 8.dp)
-                        )
-                    }
-
-                    if (uiState.isRefreshing && uiState.remoteGroups.isEmpty()) {
-                        item {
-                            Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator()
-                            }
+                        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
                         }
                     }
+                }
 
-                    items(uiState.remoteGroups) { group ->
-                        RepositoryListItem(
-                            group = group,
-                            onClick = { viewModel.selectGroup(group) }
-                        )
-                    }
+                items(uiState.remoteGroups) { group ->
+                    RepositoryListItem(
+                        group = group,
+                        onClick = { viewModel.selectGroup(group) }
+                    )
+                }
+            } else {
+                // SIBLINGS SCREEN: Show versions of the selected repository
+                val groupModels = viewModel.getModelsForGroup(uiState.selectedGroup!!.id)
+                item {
+                    Text(
+                        text = "Available versions in this repository:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                    )
+                }
+                items(groupModels) { model ->
+                    val isSelected = model.id == uiState.selectedModelId
+                    ModelCard(
+                        model = model,
+                        onDownload = { viewModel.downloadModel(model) },
+                        onPause = { viewModel.pauseDownload(model) },
+                        onStop = { viewModel.stopDownload(model) },
+                        onDetail = { viewModel.showModelDetails(model) },
+                        onClick = { 
+                            if (model.downloadStatus is DownloadStatus.Downloaded) {
+                                viewModel.selectModel(model)
+                                onModelSelected(model)
+                            } 
+                        },
+                        isSelected = isSelected,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth()
+                    )
                 }
             }
         }
@@ -222,72 +202,6 @@ fun ModelSelectionScreen(
 }
 
 @Composable
-fun HardwareSettingsCard(useGpu: Boolean, onToggleGpu: (Boolean) -> Unit) {
-    Surface(
-        modifier = Modifier.padding(16.dp),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Rounded.Memory, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text("Inference Engine", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(if (useGpu) "GPU Accelerated" else "CPU Only", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            Switch(
-                checked = useGpu,
-                onCheckedChange = onToggleGpu,
-                thumbContent = if (useGpu) {
-                    { Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(16.dp)) }
-                } else null
-            )
-        }
-    }
-}
-
-@Composable
-fun RepositoryListItem(
-    group: HFRemoteModelGroup,
-    onClick: () -> Unit
-) {
-    ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        headlineContent = { Text(group.displayName, fontWeight = FontWeight.SemiBold) },
-        supportingContent = { 
-            Text("${group.id.substringBefore("/")} • ${group.versionFiles.size} versions • ${group.downloads} downloads") 
-        },
-        leadingContent = {
-            Surface(
-                modifier = Modifier.size(40.dp),
-                shape = MaterialTheme.shapes.small,
-                color = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.FolderZip, 
-                        contentDescription = null, 
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        },
-        trailingContent = {
-            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline)
-        }
-    )
-}
-
-@Composable
 fun ModelCard(
     model: LlmModel,
     onDownload: () -> Unit,
@@ -295,29 +209,35 @@ fun ModelCard(
     onStop: () -> Unit,
     onDetail: () -> Unit,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSelected: Boolean = false
 ) {
-    val gradientBrush = Brush.linearGradient(
-        colors = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
-    )
-
     Card(
-        modifier = modifier.clickable(onClick = onClick),
+        // Card is clickable only if the model is downloaded
+        modifier = modifier.clickable(
+            enabled = model.downloadStatus is DownloadStatus.Downloaded,
+            onClick = onClick
+        ),
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)),
-        border = BorderStroke(0.5.dp, gradientBrush)
+        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) 
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f) 
+            else 
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(40.dp),
                     shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.primary
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             model.name.take(1).uppercase(),
-                            color = MaterialTheme.colorScheme.onPrimary,
+                            color = Color.White,
                             style = MaterialTheme.typography.titleLarge
                         )
                     }
@@ -344,19 +264,13 @@ fun ModelCard(
                 when (val status = model.downloadStatus) {
                     is DownloadStatus.Downloaded -> {
                         Button(onClick = onClick, modifier = Modifier.weight(1f)) {
-                            Text("Select")
+                            Text(if (isSelected) "Current" else "Select")
                         }
                     }
-                    is DownloadStatus.Downloading, is DownloadStatus.Paused -> {
-                        val progress = when(status) {
-                            is DownloadStatus.Downloading -> status.progress
-                            is DownloadStatus.Paused -> status.progress
-                            else -> 0
-                        }
-                        
+                    is DownloadStatus.Downloading -> {
                         Column(modifier = Modifier.weight(1f)) {
                             LinearProgressIndicator(
-                                progress = { progress / 100f },
+                                progress = { status.progress / 100f },
                                 modifier = Modifier.fillMaxWidth().height(6.dp),
                                 strokeCap = StrokeCap.Round
                             )
@@ -365,44 +279,58 @@ fun ModelCard(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("${progress}%", style = MaterialTheme.typography.labelSmall)
+                                Text("${status.progress}%", style = MaterialTheme.typography.labelSmall)
                                 Row {
-                                    IconButton(
-                                        onClick = if (status is DownloadStatus.Downloading) onPause else onDownload,
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Icon(
-                                            if (status is DownloadStatus.Downloading) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                    IconButton(onClick = onPause, modifier = Modifier.size(32.dp)) {
+                                        Icon(Icons.Rounded.Pause, null, modifier = Modifier.size(16.dp))
                                     }
                                     IconButton(onClick = onStop, modifier = Modifier.size(32.dp)) {
-                                        Icon(Icons.Rounded.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Rounded.Close, null, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    is DownloadStatus.Paused -> {
+                        Column(modifier = Modifier.weight(1f)) {
+                            LinearProgressIndicator(
+                                progress = { status.progress / 100f },
+                                modifier = Modifier.fillMaxWidth().height(6.dp),
+                                strokeCap = StrokeCap.Round,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${status.progress}% (Paused)", style = MaterialTheme.typography.labelSmall)
+                                Row {
+                                    IconButton(onClick = onDownload, modifier = Modifier.size(32.dp)) {
+                                        Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(16.dp))
+                                    }
+                                    IconButton(onClick = onStop, modifier = Modifier.size(32.dp)) {
+                                        Icon(Icons.Rounded.Close, null, modifier = Modifier.size(16.dp))
                                     }
                                 }
                             }
                         }
                     }
                     else -> {
-                        GradientButton(
+                        Button(
                             onClick = onDownload,
                             modifier = Modifier.weight(1f),
-                            gradient = gradientBrush
+                            contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
-                            Icon(Icons.Rounded.Download, null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Download", fontSize = 12.sp)
+                            Icon(Icons.Rounded.Download, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Download")
                         }
                     }
                 }
                 
-                OutlinedButton(
-                    onClick = onDetail,
-                    modifier = Modifier.weight(0.6f),
-                    contentPadding = PaddingValues(horizontal = 8.dp)
-                ) {
-                    Text("Details", fontSize = 12.sp)
+                OutlinedIconButton(onClick = onDetail) {
+                    Icon(Icons.Rounded.Info, null)
                 }
             }
         }
@@ -410,31 +338,38 @@ fun ModelCard(
 }
 
 @Composable
-fun GradientButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    gradient: Brush,
-    content: @Composable RowScope.() -> Unit
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(40.dp),
-        contentPadding = PaddingValues(),
-        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-        shape = MaterialTheme.shapes.medium
+fun HardwareSettingsCard(useGpu: Boolean, onToggleGpu: (Boolean) -> Unit) {
+    Surface(
+        modifier = Modifier.padding(16.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(gradient)
-                .padding(horizontal = 8.dp),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                content()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Rounded.Memory, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text("GPU Acceleration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Faster, but uses more battery", style = MaterialTheme.typography.bodySmall)
+                }
             }
+            Switch(checked = useGpu, onCheckedChange = onToggleGpu)
         }
     }
+}
+
+@Composable
+fun RepositoryListItem(group: HFRemoteModelGroup, onClick: () -> Unit) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        headlineContent = { Text(group.displayName, fontWeight = FontWeight.SemiBold) },
+        supportingContent = { Text("${group.versionFiles.size} versions available") },
+        trailingContent = { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null) }
+    )
 }
 
 @Composable
@@ -446,34 +381,25 @@ fun ModelDetailsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(model.name, fontWeight = FontWeight.Bold) },
+        title = { Text(model.name) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column {
                 Text(model.description)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                DetailRow("Provider", model.provider)
-                DetailRow("Size", model.size)
-                DetailRow("Format", model.format.name)
-                DetailRow("Type", if (model.isReasoningModel) "Reasoning" else "General Chat")
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Size: ${model.size}", fontWeight = FontWeight.Bold)
+                Text("Provider: ${model.provider}")
+                Text("Format: ${model.format}")
             }
         },
         confirmButton = {
             if (model.downloadStatus is DownloadStatus.Downloaded) {
                 Button(onClick = onSelect) { Text("Select Model") }
-            } else if (model.downloadStatus is DownloadStatus.NotDownloaded) {
-                TextButton(onClick = onDownload) { Text("Download") }
+            } else {
+                Button(onClick = onDownload) { Text("Download") }
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Close") }
         }
     )
-}
-
-@Composable
-fun DetailRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-    }
 }

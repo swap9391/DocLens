@@ -84,45 +84,58 @@ fun DocLensApp() {
     val useGpu by preferencesRepository.useGpu.collectAsState(initial = false)
     val models by modelRepository.availableModels.collectAsState()
     
-    // Centralized routing and model loading logic
-    LaunchedEffect(onboardingCompleted, selectedModelId, models, useGpu) {
-        if (onboardingCompleted == true) {
-            val downloadedModels = models.filter { it.downloadStatus is DownloadStatus.Downloaded }
+    // 1. Initial Routing Logic: Only runs once to determine where to start
+    var hasRoutedInitially by remember { mutableStateOf(false) }
+    LaunchedEffect(onboardingCompleted) {
+        if (onboardingCompleted == true && !hasRoutedInitially) {
+            val hasDownloadedModels = modelRepository.availableModels.value.any { it.downloadStatus is DownloadStatus.Downloaded }
+            val currentRoute = navController.currentDestination?.route
             
-            if (downloadedModels.isEmpty()) {
-                val currentRoute = navController.currentBackStackEntry?.destination?.route
-                if (currentRoute == null || currentRoute.startsWith("onboarding") || currentRoute == Screen.Home.route) {
+            if (currentRoute == null || currentRoute.startsWith("onboarding")) {
+                if (hasDownloadedModels) {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                } else {
                     navController.navigate(Screen.AiSetup.route) {
                         popUpTo(0) { inclusive = true }
                     }
                 }
-            } else {
-                val modelToLoad = selectedModelId?.let { id -> downloadedModels.find { it.id == id } } ?: downloadedModels.first()
-                
+            }
+            hasRoutedInitially = true
+        }
+    }
+
+    // 2. Reactive Model Loading Logic: Loads AI model when config changes
+    // Decoupled from navigation to avoid switching loops.
+    // Progress % changes don't trigger this because we only depend on the set of Downloaded IDs.
+    val downloadedModelIds = remember(models) { 
+        models.filter { it.downloadStatus is DownloadStatus.Downloaded }.map { it.id }.toSet() 
+    }
+    
+    LaunchedEffect(selectedModelId, useGpu, downloadedModelIds) {
+        if (onboardingCompleted == true && downloadedModelIds.isNotEmpty()) {
+            val currentModels = modelRepository.availableModels.value
+            val modelToLoad = selectedModelId?.let { id -> 
+                currentModels.find { it.id == id && it.id in downloadedModelIds } 
+            } ?: currentModels.firstOrNull { it.id in downloadedModelIds }
+            
+            if (modelToLoad != null) {
                 if (selectedModelId == null) {
-                    scope.launch { preferencesRepository.setSelectedModelId(modelToLoad.id) }
+                    preferencesRepository.setSelectedModelId(modelToLoad.id)
                 }
                 
-                val modelFile = File(context.filesDir, "${modelToLoad.id}.task")
+                val modelFile = modelRepository.getModelFile(modelToLoad.id, modelToLoad.format)
                 if (modelFile.exists() && modelFile.length() > 0) {
+                    // IMPORTANT: unload previous session first to fix CalculatorGraph::Run errors
+                    inferenceManager.unloadModel()
+                    Log.d("DocLensApp", "Loading model: ${modelToLoad.name}")
                     val result = inferenceManager.loadModel(modelFile.absolutePath, modelToLoad.id, useGpu)
                     if (result.isFailure) {
                         Log.e("DocLensApp", "Failed to load model: ${result.exceptionOrNull()?.message}")
                     }
                 } else {
-                    Log.e("DocLensApp", "Model file missing or empty despite repository status: ${modelFile.absolutePath}")
                     modelRepository.refreshDownloadStatuses()
-                }
-                
-                val currentRoute = navController.currentBackStackEntry?.destination?.route
-                if (currentRoute == null || currentRoute == Screen.OnboardingWelcome.route) {
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(0) { inclusive = true }
-                    }
-                } else if (currentRoute == Screen.OnboardingAskAnything.route || currentRoute == Screen.AiSetup.route) {
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(0) { inclusive = true }
-                    }
                 }
             }
         }
@@ -161,8 +174,13 @@ fun DocLensApp() {
             ModelSelectionScreen(
                 viewModel = modelSelectionViewModel,
                 onModelSelected = { model ->
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.AiSetup.route) { inclusive = true }
+                    // Decide where to navigate forward
+                    if (navController.previousBackStackEntry != null) {
+                        navController.popBackStack()
+                    } else {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.AiSetup.route) { inclusive = true }
+                        }
                     }
                 }
             )
