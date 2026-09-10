@@ -23,9 +23,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.lorem.docklens.ai.ModelLoadState
 import com.lorem.docklens.data.ChatMessageEntity
 import com.lorem.docklens.ui.theme.DockLensTheme
 import java.text.SimpleDateFormat
@@ -44,7 +46,9 @@ fun ChatScreen(
     val attachedDoc by viewModel.attachedDocument.collectAsStateWithLifecycle()
     val streamingText by viewModel.streamingResponse.collectAsStateWithLifecycle()
     val currentReasoning by viewModel.currentReasoning.collectAsStateWithLifecycle()
-    
+    val modelState by viewModel.modelState.collectAsStateWithLifecycle()
+    val canSend by viewModel.canSend.collectAsStateWithLifecycle()
+
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -67,6 +71,22 @@ fun ChatScreen(
                 title = {
                     Column {
                         Text("DocLens AI", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = when (val state = modelState) {
+                                ModelLoadState.NoModel -> "No model installed"
+                                is ModelLoadState.Loading -> "Loading ${state.model.name}…"
+                                is ModelLoadState.Ready -> state.model.name
+                                is ModelLoadState.Failed -> "Model failed to load"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (modelState is ModelLoadState.Failed) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         if (attachedDoc != null) {
                             Text(
                                 text = "Attached: ${attachedDoc?.name}",
@@ -89,17 +109,25 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            ChatInputBar(
-                inputText = inputText,
-                onTextChange = { inputText = it },
-                onSend = {
-                    viewModel.sendMessage(inputText)
-                    inputText = ""
-                },
-                onAttachClick = { imagePickerLauncher.launch("image/*") },
-                attachedDocName = attachedDoc?.name,
-                onDetachDoc = { viewModel.detachDocument() }
-            )
+            Column {
+                ModelStatusBar(
+                    state = modelState,
+                    onOpenSettings = onSettingsClick,
+                    onRetry = viewModel::retryModelLoad
+                )
+                ChatInputBar(
+                    inputText = inputText,
+                    onTextChange = { inputText = it },
+                    onSend = {
+                        viewModel.sendMessage(inputText)
+                        inputText = ""
+                    },
+                    canSend = canSend,
+                    onAttachClick = { imagePickerLauncher.launch("image/*") },
+                    attachedDocName = attachedDoc?.name,
+                    onDetachDoc = { viewModel.detachDocument() }
+                )
+            }
         }
     ) { innerPadding ->
         LazyColumn(
@@ -130,6 +158,64 @@ fun ChatScreen(
                         isStreaming = true
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelStatusBar(
+    state: ModelLoadState,
+    onOpenSettings: () -> Unit,
+    onRetry: () -> Unit
+) {
+    if (state is ModelLoadState.Ready) return
+
+    val container = when (state) {
+        is ModelLoadState.Failed -> MaterialTheme.colorScheme.errorContainer
+        else -> MaterialTheme.colorScheme.secondaryContainer
+    }
+    val contentColor = when (state) {
+        is ModelLoadState.Failed -> MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.onSecondaryContainer
+    }
+
+    Surface(color = container, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            when (state) {
+                is ModelLoadState.Loading -> CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = contentColor
+                )
+                else -> Icon(
+                    Icons.Rounded.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = contentColor
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = when (state) {
+                    ModelLoadState.NoModel ->
+                        "Download an AI model to start chatting."
+                    is ModelLoadState.Loading ->
+                        "Starting ${state.model.name}. Chat unlocks in a moment."
+                    is ModelLoadState.Failed -> state.message
+                    else -> ""
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+                modifier = Modifier.weight(1f)
+            )
+            when (state) {
+                ModelLoadState.NoModel -> TextButton(onClick = onOpenSettings) { Text("Get a model") }
+                is ModelLoadState.Failed -> TextButton(onClick = onRetry) { Text("Retry") }
+                else -> Unit
             }
         }
     }
@@ -246,10 +332,12 @@ fun ChatInputBar(
     inputText: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
+    canSend: Boolean,
     onAttachClick: () -> Unit,
     attachedDocName: String?,
     onDetachDoc: () -> Unit
 ) {
+    val sendEnabled = canSend && inputText.isNotBlank()
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -310,17 +398,17 @@ fun ChatInputBar(
                 
                 IconButton(
                     onClick = onSend,
-                    enabled = inputText.isNotBlank(),
+                    enabled = sendEnabled,
                     modifier = Modifier
                         .background(
-                            if (inputText.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            if (sendEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                             CircleShape
                         )
                 ) {
                     Icon(
                         Icons.AutoMirrored.Rounded.Send,
                         contentDescription = "Send",
-                        tint = if (inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (sendEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

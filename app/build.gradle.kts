@@ -1,9 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.devtools.ksp)
 }
+
+/**
+ * Optional Hugging Face access token used for gated repositories (Gemma, Llama).
+ * Add `HF_TOKEN=hf_xxx` to local.properties; it is never committed.
+ */
+val huggingFaceToken: String = Properties().apply {
+    val propertiesFile = rootProject.file("local.properties")
+    if (propertiesFile.exists()) {
+        propertiesFile.inputStream().use { load(it) }
+    }
+}.getProperty("HF_TOKEN", "")
 
 android {
     namespace = "com.lorem.docklens"
@@ -17,6 +30,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "HF_TOKEN", "\"$huggingFaceToken\"")
     }
 
     buildTypes {
@@ -34,6 +49,10 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 }
 
@@ -75,6 +94,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.material)
     implementation(libs.mediapipe.genai)
+    implementation(libs.mediapipe.core)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.androidx.work.runtime.ktx)
 

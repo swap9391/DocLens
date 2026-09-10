@@ -11,10 +11,26 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 
+/**
+ * Legacy single-model downloader from the first prototype.
+ *
+ * It is unreachable from the navigation graph and hard-codes a `.bin` Gemma model
+ * that the current MediaPipe runtime cannot load. Model download, storage and
+ * loading now live in [com.lorem.docklens.data.ModelRepository],
+ * [com.lorem.docklens.data.ModelDownloadWorker] and
+ * [com.lorem.docklens.ai.ModelLoadCoordinator].
+ *
+ * Kept only so the old `AiSetupScreen` still compiles; safe to delete along with
+ * `AiSetupScreen.kt` and `AiSetupViewModel.kt`.
+ */
+@Deprecated(
+    message = "Replaced by ModelRepository + ModelDownloadWorker + ModelLoadCoordinator.",
+    level = DeprecationLevel.WARNING
+)
 class AiModelManager(private val context: Context) {
 
     private var llmInference: LlmInference? = null
-    private val modelFileName = "gemma-2b-it-cpu-int4.bin"
+    private val modelFileName = "gemma-1.1-2b-it-cpu-int4.bin"
     private val modelFile: File by lazy {
         File(context.filesDir, modelFileName)
     }

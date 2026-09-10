@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lorem.docklens.ai.InferenceManager
 import com.lorem.docklens.ai.InferenceStep
+import com.lorem.docklens.ai.ModelLoadCoordinator
+import com.lorem.docklens.ai.ModelLoadState
 import com.lorem.docklens.ai.OcrHelper
 import com.lorem.docklens.data.ChatMessageEntity
 import com.lorem.docklens.data.ChatRepository
@@ -20,6 +22,7 @@ class ChatViewModel(
     private val chatRepository: ChatRepository,
     private val documentRepository: DocumentRepository,
     private val ocrHelper: OcrHelper,
+    private val modelLoadCoordinator: ModelLoadCoordinator,
     private val initialDocumentId: Long?
 ) : ViewModel() {
 
@@ -34,6 +37,17 @@ class ChatViewModel(
 
     private val _attachedDocument = MutableStateFlow<DocumentEntity?>(null)
     val attachedDocument: StateFlow<DocumentEntity?> = _attachedDocument
+
+    /**
+     * Which model is answering. Chat is intentionally blocked until this is
+     * [ModelLoadState.Ready], so a message can never be silently dropped because
+     * the engine was still initialising or had failed to start.
+     */
+    val modelState: StateFlow<ModelLoadState> = modelLoadCoordinator.state
+
+    val canSend: StateFlow<Boolean> = combine(modelState, _isTyping) { state, typing ->
+        state is ModelLoadState.Ready && !typing
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val messages: StateFlow<List<ChatMessageEntity>> = _sessionId.flatMapLatest { id ->
@@ -50,44 +64,62 @@ class ChatViewModel(
 
     init {
         viewModelScope.launch {
-            // Create a new session or load existing
             val id = chatRepository.createSession("New Chat", null)
             _sessionId.value = id
 
             initialDocumentId?.let { docId ->
                 if (docId != -1L) {
-                    val doc = documentRepository.getDocumentById(docId)
-                    _attachedDocument.value = doc
+                    _attachedDocument.value = documentRepository.getDocumentById(docId)
                 }
             }
         }
     }
 
+    fun retryModelLoad() = modelLoadCoordinator.retry()
+
     fun sendMessage(text: String) {
         val sid = _sessionId.value ?: return
         if (text.isBlank()) return
 
+        val currentModelState = modelState.value
+        if (currentModelState !is ModelLoadState.Ready) {
+            viewModelScope.launch {
+                chatRepository.saveMessage(sid, text, isUser = true)
+                chatRepository.saveMessage(
+                    sid,
+                    when (currentModelState) {
+                        ModelLoadState.NoModel ->
+                            "No AI model is installed yet. Open AI settings to download one."
+                        is ModelLoadState.Loading ->
+                            "${currentModelState.model.name} is still loading. Try again in a moment."
+                        is ModelLoadState.Failed ->
+                            "The selected model could not be loaded: ${currentModelState.message}"
+                        else -> "The AI engine is not ready yet."
+                    },
+                    isUser = false
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
-            // Save user message
             chatRepository.saveMessage(sid, text, isUser = true)
-            
+
             _isTyping.value = true
             _streamingResponse.value = ""
             _currentReasoning.value = null
-            
-            var contextText: String? = null
-            _attachedDocument.value?.let { doc ->
-                contextText = ocrHelper.extractText(File(doc.uri))
+
+            val contextText = _attachedDocument.value?.let { doc ->
+                runCatching { ocrHelper.extractText(File(doc.uri)) }.getOrNull()
             }
 
-            val prompt = if (contextText != null) {
+            val prompt = if (!contextText.isNullOrBlank()) {
                 "Context from document: $contextText\n\nUser Question: $text"
             } else {
                 text
             }
 
             var accumulatedText = ""
-            var finalReasoning: String? = null
 
             inferenceManager.generateResponse(prompt).collect { step ->
                 when (step) {
@@ -101,8 +133,12 @@ class ChatViewModel(
                     is InferenceStep.FullResponse -> {
                         _isTyping.value = false
                         _streamingResponse.value = null
-                        finalReasoning = _currentReasoning.value
-                        chatRepository.saveMessage(sid, step.response, isUser = false, reasoning = finalReasoning)
+                        chatRepository.saveMessage(
+                            sid,
+                            step.response,
+                            isUser = false,
+                            reasoning = _currentReasoning.value
+                        )
                     }
                     is InferenceStep.Error -> {
                         _isTyping.value = false
@@ -134,12 +170,20 @@ class ChatViewModelFactory(
     private val chatRepository: ChatRepository,
     private val documentRepository: DocumentRepository,
     private val ocrHelper: OcrHelper,
+    private val modelLoadCoordinator: ModelLoadCoordinator,
     private val initialDocumentId: Long?
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return ChatViewModel(inferenceManager, chatRepository, documentRepository, ocrHelper, initialDocumentId) as T
+            return ChatViewModel(
+                inferenceManager,
+                chatRepository,
+                documentRepository,
+                ocrHelper,
+                modelLoadCoordinator,
+                initialDocumentId
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

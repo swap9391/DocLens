@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug-only network security config.
+
+    Trust anchors are declared explicitly on every block instead of relying on
+    <debug-overrides> alone: a <domain-config> resolves its trust anchors from the
+    nearest enclosing config, so the huggingface.co block below would not otherwise
+    pick up user-installed CAs.
+
+    "user" certificates are what let a developer run behind Charles / Proxyman / a
+    corporate VPN without hitting
+    "Trust anchor for certification path not found".
+    This file is NOT part of the release APK.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">huggingface.co</domain>
+        <domain includeSubdomains="true">hf.co</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>
+

@@ -12,6 +12,15 @@ interface InferenceManager {
     fun stopGeneration()
     fun unloadModel()
     fun clearSession()
+
+    /**
+     * Forgets that a model previously killed the process during loading.
+     *
+     * A model whose weights cannot be prepared aborts natively (SIGABRT), which no
+     * `catch` can intercept, so repeated attempts are blocked automatically. Only an
+     * explicit user retry - after freeing storage - should lift that block.
+     */
+    fun clearLoadFailureHistory() = Unit
 }
 
 sealed class InferenceStep {

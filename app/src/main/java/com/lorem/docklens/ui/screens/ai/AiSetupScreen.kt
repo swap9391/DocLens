@@ -26,7 +26,7 @@ fun AiSetupScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val testResult by viewModel.testResult.collectAsStateWithLifecycle()
     
-    val modelUrl = "https://storage.googleapis.com/mediapipe-models/llm_inference/gemma-2b-it-cpu-int4.bin"
+    val modelUrl = "https://huggingface.co/t-ghosh/gemma-tflite/resolve/main/gemma-1.1-2b-it-cpu-int4.bin?download=true"
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
