@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.CompareArrows
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -68,7 +70,7 @@ fun HomeScreen(
                 title = { Text("DocLens", fontWeight = FontWeight.Bold) },
                 actions = {
                     IconButton(onClick = { onChatClick(null) }) {
-                        Icon(Icons.Rounded.Chat, contentDescription = "AI Chat")
+                        Icon(Icons.AutoMirrored.Rounded.Chat, contentDescription = "AI Chat")
                     }
                     if (documents.size >= 2) {
                         IconButton(onClick = { 
@@ -76,7 +78,7 @@ fun HomeScreen(
                             if (!isCompareMode) selectedDocsForCompare = emptyList()
                         }) {
                             Icon(
-                                Icons.Rounded.CompareArrows, 
+                                Icons.AutoMirrored.Rounded.CompareArrows,
                                 contentDescription = "Compare",
                                 tint = if (isCompareMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                             )
@@ -343,8 +345,8 @@ fun HomeScreenPreview() {
                 CenterAlignedTopAppBar(
                     title = { Text("DocLens", fontWeight = FontWeight.Bold) },
                     actions = {
-                        IconButton(onClick = {}) { Icon(Icons.Rounded.Chat, null) }
-                        IconButton(onClick = {}) { Icon(Icons.Rounded.CompareArrows, null) }
+                        IconButton(onClick = {}) { Icon(Icons.AutoMirrored.Rounded.Chat, null) }
+                        IconButton(onClick = {}) { Icon(Icons.AutoMirrored.Rounded.CompareArrows, null) }
                     }
                 )
             },

@@ -43,9 +43,11 @@ fun ModelSelectionScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showTokenDialog by remember { mutableStateOf(false) }
 
+/*
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(viewModel::importModel) }
+*/
 
     BackHandler(enabled = uiState.selectedGroup != null) { viewModel.selectGroup(null) }
 
@@ -59,15 +61,15 @@ fun ModelSelectionScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            if (uiState.selectedGroup == null) {
-                ExtendedFloatingActionButton(
-                    onClick = { importLauncher.launch(arrayOf("*/*")) },
-                    icon = { Icon(Icons.Rounded.DriveFolderUpload, contentDescription = null) },
-                    text = { Text("Import .task") }
-                )
-            }
-        },
+//        floatingActionButton = {
+//            if (uiState.selectedGroup == null) {
+//                ExtendedFloatingActionButton(
+//                    onClick = { importLauncher.launch(arrayOf("*/*")) },
+//                    icon = { Icon(Icons.Rounded.DriveFolderUpload, contentDescription = null) },
+//                    text = { Text("Import .task") }
+//                )
+//            }
+//        },
         topBar = {
             CenterAlignedTopAppBar(
                 modifier = Modifier.statusBarsPadding(),
@@ -87,7 +89,7 @@ fun ModelSelectionScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showTokenDialog = true }) {
+                    /*IconButton(onClick = { showTokenDialog = true }) {
                         Icon(
                             imageVector = if (uiState.hasToken) Icons.Rounded.Key else Icons.Rounded.VpnKeyOff,
                             contentDescription = "Hugging Face token",
@@ -97,7 +99,7 @@ fun ModelSelectionScreen(
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             }
                         )
-                    }
+                    }*/
                     IconButton(onClick = viewModel::refreshModels, enabled = !uiState.isRefreshing) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Refresh models")
                     }
@@ -235,9 +237,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exploreSection(
         )
     }
 
-    if (!uiState.hasToken) {
+    /*if (!uiState.hasToken) {
         item { GatedModelsHintCard(onAddToken = onAddToken) }
-    }
+    }*/
 
     if (uiState.searchQuery.isNotBlank()) {
         item { SectionHeader("Matching models (${uiState.searchResults.size})") }
