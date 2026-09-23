@@ -1,5 +1,6 @@
 package com.lorem.docklens.data
 
+import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 class DocumentRepository(private val documentDao: DocumentDao) {
@@ -15,5 +16,9 @@ class DocumentRepository(private val documentDao: DocumentDao) {
 
     suspend fun getDocumentById(id: Long): DocumentEntity? {
         return documentDao.getDocumentById(id)
+    }
+
+    suspend fun getLatestDocument(): DocumentEntity? {
+        return documentDao.getLatestDocument()
     }
 }

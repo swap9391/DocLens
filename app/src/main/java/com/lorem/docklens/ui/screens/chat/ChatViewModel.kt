@@ -1,5 +1,8 @@
 package com.lorem.docklens.ui.screens.chat
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -13,9 +16,12 @@ import com.lorem.docklens.data.ChatRepository
 import com.lorem.docklens.data.DocumentEntity
 import com.lorem.docklens.data.DocumentRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.FileOutputStream
+import kotlin.time.Duration.Companion.milliseconds
 
 class ChatViewModel(
     private val inferenceManager: InferenceManager,
@@ -23,7 +29,7 @@ class ChatViewModel(
     private val documentRepository: DocumentRepository,
     private val ocrHelper: OcrHelper,
     private val modelLoadCoordinator: ModelLoadCoordinator,
-    private val initialDocumentId: Long?
+    private val initialDocumentId: Long?,
 ) : ViewModel() {
 
     private val _sessionId = MutableStateFlow<Long?>(null)
@@ -127,6 +133,7 @@ class ChatViewModel(
                         _currentReasoning.value = (_currentReasoning.value ?: "") + step.text
                     }
                     is InferenceStep.PartialResponse -> {
+                        _isTyping.value = true
                         accumulatedText += step.text
                         _streamingResponse.value = accumulatedText
                     }
@@ -151,6 +158,22 @@ class ChatViewModel(
         }
     }
 
+    val allDocuments: StateFlow<List<DocumentEntity>> = documentRepository.allDocuments
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+     fun getDocumentById()  {
+        //documentRepository.getDocumentById(allDocuments.value.last().id)
+        viewModelScope.launch {
+            delay(1000.milliseconds)
+
+            val lastDocument: DocumentEntity? =
+                documentRepository.getLatestDocument()
+
+            attachDocument(lastDocument!!)
+        }
+
+    }
+
     fun attachDocument(document: DocumentEntity) {
         _attachedDocument.value = document
     }
@@ -163,6 +186,42 @@ class ChatViewModel(
         super.onCleared()
         inferenceManager.stopGeneration()
     }
+
+    fun importDocument(context: Context, uri: Uri, type: String) {
+        viewModelScope.launch {
+            val displayName = getFileName(context, uri)
+            val fileName = "imported_${System.currentTimeMillis()}.${if (type == "PDF") "pdf" else "jpg"}"
+            val file = File(context.filesDir, fileName)
+
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(file).use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            val document = DocumentEntity(
+                name = displayName,
+                type = type,
+                uri = file.absolutePath
+            )
+            documentRepository.insert(document)
+        }
+    }
+
+    private fun getFileName(context: Context, uri: Uri): String {
+        var name = "Unknown Document"
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1) {
+                    name = it.getString(nameIndex)
+                }
+            }
+        }
+        return name
+    }
+
 }
 
 class ChatViewModelFactory(

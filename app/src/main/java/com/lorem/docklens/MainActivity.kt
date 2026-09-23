@@ -180,7 +180,8 @@ fun DocLensApp() {
             ChatScreen(
                 viewModel = chatViewModel,
                 onNavigateBack = { navController.popBackStack() },
-                onSettingsClick = { navController.navigate(Screen.AiSetup.route) }
+                onSettingsClick = { navController.navigate(Screen.AiSetup.route) },
+                onScanClick = { navController.navigate(Screen.CameraScanner.route) }
             )
         }
         composable(

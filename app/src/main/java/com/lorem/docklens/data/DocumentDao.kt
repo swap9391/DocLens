@@ -16,4 +16,13 @@ interface DocumentDao {
 
     @Query("SELECT * FROM documents WHERE id = :id")
     suspend fun getDocumentById(id: Long): DocumentEntity?
+
+    @Query("""
+SELECT * FROM documents
+ORDER BY timestamp DESC
+LIMIT 1
+""")
+    suspend fun getLatestDocument(): DocumentEntity?
+
+
 }

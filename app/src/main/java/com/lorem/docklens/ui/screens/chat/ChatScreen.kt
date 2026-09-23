@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.lorem.docklens.ai.ModelLoadState
 import com.lorem.docklens.data.ChatMessageEntity
+import com.lorem.docklens.ui.screens.home.OptionItem
 import com.lorem.docklens.ui.theme.DockLensTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -39,8 +41,10 @@ import java.util.Locale
 fun ChatScreen(
     viewModel: ChatViewModel,
     onNavigateBack: () -> Unit,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    onScanClick: () -> Unit,
 ) {
+    val context = LocalContext.current
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isTyping by viewModel.isTyping.collectAsStateWithLifecycle()
     val attachedDoc by viewModel.attachedDocument.collectAsStateWithLifecycle()
@@ -48,21 +52,50 @@ fun ChatScreen(
     val currentReasoning by viewModel.currentReasoning.collectAsStateWithLifecycle()
     val modelState by viewModel.modelState.collectAsStateWithLifecycle()
     val canSend by viewModel.canSend.collectAsStateWithLifecycle()
-
+    var showAddOptions by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    val imagePickerLauncher = rememberLauncherForActivityResult(
+    /*val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        // Handle ad-hoc image attachment
-    }
+        showAddOptions = true
+    }*/
 
-    LaunchedEffect(messages.size, streamingText) {
+    /*LaunchedEffect(messages.size, streamingText) {
         if (messages.isNotEmpty() || streamingText != null) {
             listState.animateScrollToItem(if (streamingText != null) messages.size else messages.size - 1)
         }
+    }*/
+
+    LaunchedEffect(isTyping) {
+        if (isTyping) {
+            // Runs only once when isTyping changes from false to true.
+            listState.animateScrollToItem(messages.size)
+        }
     }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            val mimeType = context.contentResolver.getType(it)
+            val type = if (mimeType?.contains("pdf", ignoreCase = true) == true) "PDF" else "IMAGE"
+            viewModel.importDocument(context, it, type)
+            viewModel.getDocumentById()
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            onScanClick()
+        }
+    }
+
+
+
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -123,7 +156,11 @@ fun ChatScreen(
                         inputText = ""
                     },
                     canSend = canSend,
-                    onAttachClick = { imagePickerLauncher.launch("image/*") },
+                    onAttachClick = {
+                        viewModel.detachDocument()
+                        showAddOptions = true
+                        //imagePickerLauncher.launch("image/*")
+                                    },
                     attachedDocName = attachedDoc?.name,
                     onDetachDoc = { viewModel.detachDocument() }
                 )
@@ -161,6 +198,51 @@ fun ChatScreen(
             }
         }
     }
+
+
+
+    if (showAddOptions) {
+        ModalBottomSheet(
+            onDismissRequest = { showAddOptions = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 48.dp, start = 24.dp, end = 24.dp)
+            ) {
+                Text(
+                    text = "Add Document",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 24.dp)
+                )
+
+                OptionItem(
+                    icon = Icons.Rounded.CameraAlt,
+                    label = "Scan with Camera",
+                    description = "Capture a physical document",
+                    onClick = {
+                        showAddOptions = false
+                        cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OptionItem(
+                    icon = Icons.Rounded.FileOpen,
+                    label = "Import File",
+                    description = "Choose a PDF or Image from your device",
+                    onClick = {
+                        showAddOptions = false
+                        filePickerLauncher.launch(arrayOf("image/*", "application/pdf"))
+                    }
+                )
+            }
+        }
+    }
+
 }
 
 @Composable
