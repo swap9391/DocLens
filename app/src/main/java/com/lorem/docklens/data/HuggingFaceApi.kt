@@ -146,7 +146,7 @@ interface HFApi {
     suspend fun listModels(
         @Query("author") author: String?,
         @Query("search") search: String?,
-        @Query("full") full: Boolean,
+        @Query("expand") expand: String,
         @Query("limit") limit: Int,
         @Query("sort") sort: String,
         @Query("direction") direction: String
@@ -235,7 +235,7 @@ class HuggingFaceModelsRepository(
                 add(
                     async {
                         runCatching {
-                            withTlsFallback { it.listModels(author, null, true, AUTHOR_LIMIT, "downloads", "-1") }
+                            withTlsFallback { it.listModels(author, null, "siblings", AUTHOR_LIMIT, "downloads", "-1") }
                         }
                     }
                 )
@@ -244,7 +244,7 @@ class HuggingFaceModelsRepository(
                 add(
                     async {
                         runCatching {
-                            withTlsFallback { it.listModels(null, search, true, SEARCH_LIMIT, "downloads", "-1") }
+                            withTlsFallback { it.listModels(null, search, "siblings", SEARCH_LIMIT, "downloads", "-1") }
                         }
                     }
                 )
